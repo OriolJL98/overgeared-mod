@@ -251,23 +251,166 @@ public final class CapsuleTests {
     }
 
     @GameTest(template = TestSupport.EMPTY)
-    public static void walkingAwayOrLosingTheCapsuleCancelsTheConnection(GameTestHelper helper) {
+    public static void losingTheCapsuleOrBeingOutOfReachCancelsTheConnection(GameTestHelper helper) {
         ServerPlayer player = TestSupport.fakePlayer(helper);
         BlockPos capsule = new BlockPos(0, 1, 1);
         helper.setBlock(capsule, ModBlocks.CAPSULE.get());
         inSatisfy(helper, helper.absolutePos(new BlockPos(1, 1, 1)), () -> {
-            CapsuleService.start(player, at(helper, capsule));
-            player.setPos(player.getX() + CapsuleRules.MAX_DISTANCE + 2, player.getY(), player.getZ());
-            CapsuleService.tick(player);
-            helper.assertFalse(CapsuleService.isConnecting(player), "walking away cancels");
-            helper.assertTrue(CapsuleService.state(player).capsule().isEmpty(), "and nothing connected");
-
             player.setPos(helper.absoluteVec(new Vec3(0.5, 1, 0.5)));
             CapsuleService.start(player, at(helper, capsule));
             helper.setBlock(capsule, Blocks.AIR);
             CapsuleService.tick(player);
             helper.assertFalse(CapsuleService.isConnecting(player), "the capsule gone cancels");
             helper.assertTrue(CapsuleService.state(player).capsule().isEmpty(), "and nothing connected");
+
+            // Standing still but already out of reach (a capsule farther than MAX_DISTANCE): cancelled too.
+            BlockPos far = new BlockPos(0, 1, 6);
+            helper.setBlock(far, ModBlocks.CAPSULE.get());
+            player.setPos(helper.absoluteVec(new Vec3(0.5, 1, 0.5)));
+            helper.assertFalse(CapsuleRules.inReach(player.distanceToSqr(helper.absolutePos(far).getCenter())),
+                    "the capsule is out of reach");
+            CapsuleService.start(player, at(helper, far));
+            CapsuleService.tick(player);
+            helper.assertFalse(CapsuleService.isConnecting(player), "out of reach without moving cancels");
+            helper.assertTrue(CapsuleService.state(player).capsule().isEmpty(), "and nothing connected");
+        });
+        helper.succeed();
+    }
+
+    private static final Vec3 SPOT = new Vec3(0.5, 1, 0.5);
+
+    /** The wait starts with the player at {@link #SPOT} beside a capsule at (0, 1, 1). */
+    private static GlobalPos startWaiting(GameTestHelper helper, ServerPlayer player) {
+        BlockPos capsule = new BlockPos(0, 1, 1);
+        helper.setBlock(capsule, ModBlocks.CAPSULE.get());
+        player.setPos(helper.absoluteVec(SPOT));
+        GlobalPos global = at(helper, capsule);
+        CapsuleService.start(player, global);
+        return global;
+    }
+
+    private static void shiftTo(GameTestHelper helper, ServerPlayer player, double dx, double dy, double dz) {
+        player.setPos(helper.absoluteVec(SPOT.add(dx, dy, dz)));
+    }
+
+    @GameTest(template = TestSupport.EMPTY)
+    public static void movingDuringTheWaitCancelsTheConnection(GameTestHelper helper) {
+        ServerPlayer player = TestSupport.fakePlayer(helper);
+        inSatisfy(helper, helper.absolutePos(new BlockPos(1, 1, 1)), () -> {
+            double[][] shifts = {{0.6, 0, 0}, {0, 0.6, 0}, {0, -0.6, 0}, {0, 0, 0.6}, {0.4, 0.4, 0}, {0.3, 0.3, 0.3}};
+            try {
+                for (double[] shift : shifts) {
+                    startWaiting(helper, player);
+                    shiftTo(helper, player, shift[0], shift[1], shift[2]);
+                    CapsuleService.tick(player);
+                    helper.assertFalse(CapsuleService.isConnecting(player), "moving cancels (" + shift[0] + ", " + shift[1] + ", " + shift[2] + ")");
+                    helper.assertTrue(CapsuleService.state(player).capsule().isEmpty(), "and nothing connected");
+                    tickMany(player, CapsuleRules.CONNECT_TICKS + 5);
+                    helper.assertTrue(CapsuleService.state(player).capsule().isEmpty(), "it never connects afterwards");
+                }
+            } finally {
+                CapsuleService.cancel(player, false);
+            }
+        });
+        helper.succeed();
+    }
+
+    @GameTest(template = TestSupport.EMPTY)
+    public static void turningAndSmallShiftsDoNotCancelTheConnection(GameTestHelper helper) {
+        ServerPlayer player = TestSupport.fakePlayer(helper);
+        inSatisfy(helper, helper.absolutePos(new BlockPos(1, 1, 1)), () -> {
+            try {
+                startWaiting(helper, player);
+                player.setYRot(123f);
+                player.setXRot(-40f);
+                player.setYHeadRot(77f);
+                shiftTo(helper, player, 0.4, 0, 0);
+                tickMany(player, CapsuleRules.CONNECT_TICKS - 1);
+                helper.assertTrue(CapsuleService.isConnecting(player), "turning and a small shift keep waiting");
+                CapsuleService.tick(player);
+                helper.assertFalse(CapsuleService.isConnecting(player), "the wait is over");
+                helper.assertTrue(CapsuleService.state(player).capsule().isPresent(), "and it connects");
+            } finally {
+                CapsuleService.cancel(player, false);
+            }
+        });
+        helper.succeed();
+    }
+
+    @GameTest(template = TestSupport.EMPTY)
+    public static void aSmallDiagonalShiftDoesNotCancelTheConnection(GameTestHelper helper) {
+        ServerPlayer player = TestSupport.fakePlayer(helper);
+        inSatisfy(helper, helper.absolutePos(new BlockPos(1, 1, 1)), () -> {
+            try {
+                startWaiting(helper, player);
+                shiftTo(helper, player, 0.3, 0.3, 0);
+                tickMany(player, CapsuleRules.CONNECT_TICKS - 1);
+                helper.assertTrue(CapsuleService.isConnecting(player), "a small diagonal shift keeps waiting");
+                CapsuleService.tick(player);
+                helper.assertFalse(CapsuleService.isConnecting(player), "the wait is over");
+                helper.assertTrue(CapsuleService.state(player).capsule().isPresent(), "and it connects");
+            } finally {
+                CapsuleService.cancel(player, false);
+            }
+        });
+        helper.succeed();
+    }
+
+    @GameTest(template = TestSupport.EMPTY)
+    public static void creepingAwayIsMeasuredFromTheStart(GameTestHelper helper) {
+        ServerPlayer player = TestSupport.fakePlayer(helper);
+        inSatisfy(helper, helper.absolutePos(new BlockPos(1, 1, 1)), () -> {
+            try {
+                startWaiting(helper, player);
+                shiftTo(helper, player, 0.3, 0, 0);
+                CapsuleService.tick(player);
+                helper.assertTrue(CapsuleService.isConnecting(player), "0.3 from the start: still waiting");
+                shiftTo(helper, player, 0.6, 0, 0);
+                CapsuleService.tick(player);
+                helper.assertFalse(CapsuleService.isConnecting(player), "0.6 from the start (0.3 more): cancelled");
+                helper.assertTrue(CapsuleService.state(player).capsule().isEmpty(), "and nothing connected");
+            } finally {
+                CapsuleService.cancel(player, false);
+            }
+        });
+        helper.succeed();
+    }
+
+    @GameTest(template = TestSupport.EMPTY)
+    public static void movingOnTheLastTickCancelsTheConnection(GameTestHelper helper) {
+        ServerPlayer player = TestSupport.fakePlayer(helper);
+        inSatisfy(helper, helper.absolutePos(new BlockPos(1, 1, 1)), () -> {
+            try {
+                startWaiting(helper, player);
+                tickMany(player, CapsuleRules.CONNECT_TICKS - 1);
+                helper.assertTrue(CapsuleService.isConnecting(player), "one tick before the end");
+                shiftTo(helper, player, 0.6, 0, 0);
+                CapsuleService.tick(player);
+                helper.assertFalse(CapsuleService.isConnecting(player), "moving on the last tick cancels");
+                helper.assertTrue(CapsuleService.state(player).capsule().isEmpty(), "and it does not connect");
+            } finally {
+                CapsuleService.cancel(player, false);
+            }
+        });
+        helper.succeed();
+    }
+
+    @GameTest(template = TestSupport.EMPTY)
+    public static void lyingDownAgainAfterMovingWorks(GameTestHelper helper) {
+        ServerPlayer player = TestSupport.fakePlayer(helper);
+        inSatisfy(helper, helper.absolutePos(new BlockPos(1, 1, 1)), () -> {
+            try {
+                GlobalPos capsule = startWaiting(helper, player);
+                shiftTo(helper, player, 0.6, 0, 0);
+                CapsuleService.tick(player);
+                helper.assertFalse(CapsuleService.isConnecting(player), "moving cancels");
+                CapsuleService.start(player, capsule);
+                tickMany(player, CapsuleRules.CONNECT_TICKS);
+                helper.assertFalse(CapsuleService.isConnecting(player), "the new wait is over");
+                helper.assertTrue(CapsuleService.state(player).capsule().isPresent(), "and it connects from the new spot");
+            } finally {
+                CapsuleService.cancel(player, false);
+            }
         });
         helper.succeed();
     }

@@ -13,6 +13,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.common.damagesource.DamageContainer;
 import net.neoforged.neoforge.event.entity.living.LivingDamageEvent;
@@ -181,6 +182,138 @@ public final class LogoutTests {
     @GameTest(template = TestSupport.EMPTY)
     public static void damageTakenDuringTheCountdownCancelsIt(GameTestHelper helper) {
         cancelledBy(helper, "damage", LogoutTests::damage);
+        helper.succeed();
+    }
+
+    private static void moveAndTick(ServerPlayer player, double dx, double dy, double dz) {
+        player.setPos(player.getX() + dx, player.getY() + dy, player.getZ() + dz);
+        LogoutService.tick(player);
+    }
+
+    @GameTest(template = TestSupport.EMPTY)
+    public static void movingDuringTheCountdownCancelsIt(GameTestHelper helper) {
+        cancelledBy(helper, "move X", player -> moveAndTick(player, 0.6, 0, 0));
+        cancelledBy(helper, "move Y", player -> moveAndTick(player, 0, -0.6, 0));
+        cancelledBy(helper, "move +Y", player -> moveAndTick(player, 0, 0.6, 0));
+        cancelledBy(helper, "move +Z", player -> moveAndTick(player, 0, 0, 0.6));
+        cancelledBy(helper, "move -Z", player -> moveAndTick(player, 0, 0, -0.6));
+        cancelledBy(helper, "diagonal XY", player -> moveAndTick(player, 0.4, 0.4, 0));
+        cancelledBy(helper, "diagonal XYZ", player -> moveAndTick(player, 0.3, 0.3, 0.3));
+        helper.succeed();
+    }
+
+    @GameTest(template = TestSupport.EMPTY)
+    public static void creepingAwayIsMeasuredFromTheStartInLogout(GameTestHelper helper) {
+        ServerPlayer player = TestSupport.fakePlayer(helper);
+        CapsuleTests.inSatisfy(helper, helper.absolutePos(new BlockPos(1, 1, 1)), () -> {
+            try {
+                helper.assertTrue(CapsuleService.connect(player, capsule(helper)), "connects");
+                helper.assertTrue(LogoutService.start(player) == LogoutService.Start.STARTED, "starts");
+                Vec3 start = player.position();
+                player.setPos(start.add(0.3, 0, 0));
+                LogoutService.tick(player);
+                helper.assertTrue(LogoutService.isCountingDown(player), "0.3 from the start: still counting");
+                player.setPos(start.add(0.6, 0, 0));
+                LogoutService.tick(player);
+                helper.assertFalse(LogoutService.isCountingDown(player), "0.6 from the start (0.3 more): cancelled");
+                helper.assertTrue(CapsuleService.state(player).capsule().isPresent(), "nobody was disconnected");
+                helper.assertTrue(CapsuleService.state(player).lastSave().isEmpty(), "and nothing was saved");
+            } finally {
+                LogoutService.forgetAll();
+                CapsuleService.cancel(player, false);
+            }
+        });
+        helper.succeed();
+    }
+
+    @GameTest(template = TestSupport.EMPTY)
+    public static void aSmallDiagonalShiftDoesNotCancelTheCountdown(GameTestHelper helper) {
+        ServerPlayer player = TestSupport.fakePlayer(helper);
+        CapsuleTests.inSatisfy(helper, helper.absolutePos(new BlockPos(1, 1, 1)), () -> {
+            try {
+                helper.assertTrue(CapsuleService.connect(player, capsule(helper)), "connects");
+                helper.assertTrue(LogoutService.start(player) == LogoutService.Start.STARTED, "starts");
+                player.setPos(player.getX() + 0.3, player.getY(), player.getZ() + 0.3);
+                tickMany(player, LogoutRules.COUNTDOWN_TICKS - 1);
+                helper.assertTrue(LogoutService.isCountingDown(player), "still counting at tick 59");
+                tickMany(player, 1);
+                helper.assertFalse(LogoutService.isCountingDown(player), "the countdown is over");
+                helper.assertTrue(CapsuleService.state(player).capsule().isEmpty(), "the body is back");
+                helper.assertTrue(CapsuleService.state(player).lastSave().isPresent(), "and the spot is saved");
+            } finally {
+                LogoutService.forgetAll();
+                CapsuleService.cancel(player, false);
+            }
+        });
+        helper.succeed();
+    }
+
+    @GameTest(template = TestSupport.EMPTY)
+    public static void turningAndSmallShiftsDoNotCancelTheCountdown(GameTestHelper helper) {
+        ServerPlayer player = TestSupport.fakePlayer(helper);
+        CapsuleTests.inSatisfy(helper, helper.absolutePos(new BlockPos(1, 1, 1)), () -> {
+            try {
+                helper.assertTrue(CapsuleService.connect(player, capsule(helper)), "connects");
+                helper.assertTrue(LogoutService.start(player) == LogoutService.Start.STARTED, "starts");
+                player.setYRot(123f);
+                player.setXRot(-40f);
+                player.setYHeadRot(77f);
+                player.setPos(player.getX() + 0.4, player.getY(), player.getZ());
+                tickMany(player, LogoutRules.COUNTDOWN_TICKS - 1);
+                helper.assertTrue(LogoutService.isCountingDown(player), "still counting at tick 59");
+                tickMany(player, 1);
+                helper.assertFalse(LogoutService.isCountingDown(player), "the countdown is over");
+                helper.assertTrue(CapsuleService.state(player).capsule().isEmpty(), "the body is back");
+                helper.assertTrue(CapsuleService.state(player).lastSave().isPresent(), "and the spot is saved");
+            } finally {
+                LogoutService.forgetAll();
+                CapsuleService.cancel(player, false);
+            }
+        });
+        helper.succeed();
+    }
+
+    @GameTest(template = TestSupport.EMPTY)
+    public static void movingOnTheLastTickCancelsTheCountdown(GameTestHelper helper) {
+        ServerPlayer player = TestSupport.fakePlayer(helper);
+        CapsuleTests.inSatisfy(helper, helper.absolutePos(new BlockPos(1, 1, 1)), () -> {
+            try {
+                helper.assertTrue(CapsuleService.connect(player, capsule(helper)), "connects");
+                helper.assertTrue(LogoutService.start(player) == LogoutService.Start.STARTED, "starts");
+                tickMany(player, LogoutRules.COUNTDOWN_TICKS - 1);
+                helper.assertTrue(LogoutService.isCountingDown(player), "one tick before the end");
+                moveAndTick(player, 0.6, 0, 0);
+                helper.assertFalse(LogoutService.isCountingDown(player), "moving on the last tick cancels");
+                helper.assertTrue(CapsuleService.state(player).capsule().isPresent(), "nobody was disconnected");
+                helper.assertTrue(CapsuleService.state(player).lastSave().isEmpty(), "and nothing was saved");
+            } finally {
+                LogoutService.forgetAll();
+                CapsuleService.cancel(player, false);
+            }
+        });
+        helper.succeed();
+    }
+
+    @GameTest(template = TestSupport.EMPTY)
+    public static void startingAgainAfterMovingCountsFromTheNewSpot(GameTestHelper helper) {
+        ServerPlayer player = TestSupport.fakePlayer(helper);
+        CapsuleTests.inSatisfy(helper, helper.absolutePos(new BlockPos(1, 1, 1)), () -> {
+            try {
+                helper.assertTrue(CapsuleService.connect(player, capsule(helper)), "connects");
+                helper.assertTrue(LogoutService.start(player) == LogoutService.Start.STARTED, "starts");
+                moveAndTick(player, 0.6, 0, 0);
+                helper.assertFalse(LogoutService.isCountingDown(player), "moving cancels");
+                helper.assertTrue(LogoutService.start(player) == LogoutService.Start.STARTED, "it can start again");
+                tickMany(player, LogoutRules.COUNTDOWN_TICKS - 1);
+                helper.assertTrue(LogoutService.isCountingDown(player), "still counting from the new spot at tick 59");
+                tickMany(player, 1);
+                helper.assertFalse(LogoutService.isCountingDown(player), "the countdown is over");
+                helper.assertTrue(CapsuleService.state(player).capsule().isEmpty(), "and the body is back");
+            } finally {
+                LogoutService.forgetAll();
+                CapsuleService.cancel(player, false);
+            }
+        });
         helper.succeed();
     }
 
