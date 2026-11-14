@@ -53,6 +53,7 @@
   "message.overgearedmod.satisfy_only": "This only works in Satisfy.",
   "message.overgearedmod.capsule.bed_ignored": "Beds in Satisfy do not set your respawn",
   "message.overgearedmod.capsule.logout_countdown": "Disconnecting in %s…",
+  "message.overgearedmod.character.cursor_dropped": "The item on your cursor did not fit in your inventory and fell to the ground",
   "message.overgearedmod.capsule.logout_in_danger": "You cannot disconnect while in danger",
   "message.overgearedmod.capsule.logout_cancelled": "Disconnection cancelled",
   "message.overgearedmod.capsule.logout_in_progress": "You are already disconnecting",

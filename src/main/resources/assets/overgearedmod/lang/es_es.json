@@ -53,6 +53,7 @@
   "message.overgearedmod.satisfy_only": "Esto solo funciona en Satisfy.",
   "message.overgearedmod.capsule.bed_ignored": "Las camas de Satisfy no fijan tu reaparición",
   "message.overgearedmod.capsule.logout_countdown": "Desconectando en %s…",
+  "message.overgearedmod.character.cursor_dropped": "El objeto del cursor no cabía en tu inventario y ha caído al suelo",
   "message.overgearedmod.capsule.logout_in_danger": "No puedes desconectar en peligro",
   "message.overgearedmod.capsule.logout_cancelled": "Desconexión cancelada",
   "message.overgearedmod.capsule.logout_in_progress": "Ya estás desconectando",

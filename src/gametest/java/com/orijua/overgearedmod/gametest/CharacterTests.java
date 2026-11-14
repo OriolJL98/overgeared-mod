@@ -240,6 +240,39 @@ public final class CharacterTests {
     }
 
     @GameTest(template = TestSupport.EMPTY)
+    public static void aCursorItemThatDoesNotFitFallsNextToThePlayerInsteadOfVanishing(GameTestHelper helper) {
+        ServerPlayer player = TestSupport.fakePlayer(helper);
+        in(helper, WorldSide.REAL, () -> {
+            Characters.settle(player);
+            for (int i = 0; i < player.getInventory().items.size(); i++) {
+                player.getInventory().setItem(i, new ItemStack(Items.DIRT, 64));
+            }
+            player.containerMenu.setCarried(new ItemStack(Items.DIAMOND, 2));
+            Characters.prepareCrossing(player);
+            helper.assertTrue(player.containerMenu.getCarried().isEmpty(), "the cursor is emptied");
+            helper.assertTrue(count(player, Items.DIAMOND) == 0, "it did not fit");
+            int dropped = player.level().getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class,
+                    player.getBoundingBox().inflate(4), e -> e.getItem().is(Items.DIAMOND)).stream().mapToInt(e -> e.getItem().getCount()).sum();
+            helper.assertTrue(dropped == 2, "both diamonds fell next to the player (found " + dropped + ")");
+        });
+        helper.succeed();
+    }
+
+    @GameTest(template = TestSupport.EMPTY)
+    public static void aCursorItemThatFitsGoesBackToTheInventoryEvenWhenItStacks(GameTestHelper helper) {
+        ServerPlayer player = TestSupport.fakePlayer(helper);
+        in(helper, WorldSide.REAL, () -> {
+            Characters.settle(player);
+            player.getInventory().setItem(0, new ItemStack(Items.DIAMOND, 10));
+            player.containerMenu.setCarried(new ItemStack(Items.DIAMOND, 5));
+            Characters.prepareCrossing(player);
+            helper.assertTrue(player.containerMenu.getCarried().isEmpty(), "the cursor is emptied");
+            helper.assertTrue(count(player, Items.DIAMOND) == 15, "all 15 diamonds are in the inventory");
+        });
+        helper.succeed();
+    }
+
+    @GameTest(template = TestSupport.EMPTY)
     public static void theCursorAndTheCraftingGridGoWithTheWorldTheyAreIn(GameTestHelper helper) {
         ServerPlayer player = TestSupport.fakePlayer(helper);
         in(helper, WorldSide.REAL, () -> {
