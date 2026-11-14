@@ -182,7 +182,7 @@ public final class CapsuleService {
 
     /** Taking damage wakes you up before you are connected. */
     private static void onDamaged(LivingDamageEvent.Post event) {
-        if (event.getEntity() instanceof ServerPlayer player && isConnecting(player)) {
+        if (event.getNewDamage() > 0 && event.getEntity() instanceof ServerPlayer player && isConnecting(player)) {
             cancel(player, true);
         }
     }
