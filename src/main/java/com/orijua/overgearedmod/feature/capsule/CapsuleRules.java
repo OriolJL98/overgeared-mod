@@ -16,6 +16,11 @@ public final class CapsuleRules {
     public static final int CONNECT_TICKS = 60;
     /** How far the player may get from the capsule while connecting before it is cancelled. */
     public static final double MAX_DISTANCE = 3.0;
+    /**
+     * How far the player may move (3D, measured from where the wait or countdown began, not tick to tick) and still
+     * count as standing still.
+     */
+    public static final double STILL_TOLERANCE = 0.5;
 
     private CapsuleRules() {
     }
@@ -59,6 +64,14 @@ public final class CapsuleRules {
     /** Whether the player is still close enough to the capsule to keep connecting. */
     public static boolean inReach(double distanceSquared) {
         return distanceSquared <= MAX_DISTANCE * MAX_DISTANCE;
+    }
+
+    /**
+     * Whether the player stayed still: the squared 3D distance from where they started is within {@link #STILL_TOLERANCE}.
+     * Turning the camera does not count as moving; NaN counts as moved.
+     */
+    public static boolean stayedStill(double distanceSquared) {
+        return distanceSquared <= STILL_TOLERANCE * STILL_TOLERANCE;
     }
 
     /**

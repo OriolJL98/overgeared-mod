@@ -40,7 +40,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Entering and leaving Satisfy through the capsule. Lying down starts a short "Connecting…" wait (cancelled by taking
- * damage or walking away); when it ends the player appears in Satisfy, where they last disconnected or, the first time,
+ * damage, moving or walking away); when it ends the player appears in Satisfy, where they last disconnected or, the first time,
  * on Bairan's plaza. Disconnecting puts them back beside their capsule. Both trips look for a free spot near the wanted
  * one ({@link SafeSpot}) and are the only way across between the real world and Satisfy ({@link WorldSeparation}).
  * The {@code /satisfy logout} countdown ({@link LogoutService}), fatigue, the sleeping body and death all end up
@@ -52,9 +52,9 @@ public final class CapsuleService {
     /** The connections in progress, by player. Normally only the server thread touches it; it is concurrent just in case. */
     private static final Map<UUID, Pending> PENDING = new ConcurrentHashMap<>();
 
-    private record Pending(GlobalPos capsule, int ticksLeft) {
+    private record Pending(GlobalPos capsule, int ticksLeft, Vec3 anchor) {
         Pending tick() {
-            return new Pending(capsule, ticksLeft - 1);
+            return new Pending(capsule, ticksLeft - 1, anchor);
         }
     }
 
@@ -114,7 +114,7 @@ public final class CapsuleService {
 
     /** The wait begins (the checks of {@link #begin} are done): the player is lying in {@code capsule}. */
     public static void start(ServerPlayer player, GlobalPos capsule) {
-        PENDING.put(player.getUUID(), new Pending(capsule, CapsuleRules.CONNECT_TICKS));
+        PENDING.put(player.getUUID(), new Pending(capsule, CapsuleRules.CONNECT_TICKS, player.position()));
         PacketDistributor.sendToPlayer(player, new CapsuleConnectingPayload(CapsuleRules.CONNECT_TICKS));
         player.level().playSound(null, capsule.pos(), SoundEvents.BEACON_ACTIVATE, SoundSource.BLOCKS, 0.6f, 1.4f);
     }
@@ -124,14 +124,18 @@ public final class CapsuleService {
     }
 
     /**
-     * Stops a connection in progress (damage, walking away, the capsule gone, death...). The "Connecting…" screen is
-     * always closed; the "cancelled" message only if {@code tellPlayer}.
+     * Stops a connection in progress (damage, moving, getting out of reach, the capsule gone, death...). The "Connecting…"
+     * screen is always closed; the "cancelled" message only if {@code tellPlayer}.
      */
     public static void cancel(ServerPlayer player, boolean tellPlayer) {
+        cancel(player, tellPlayer ? "message.overgearedmod.capsule.cancelled" : null);
+    }
+
+    private static void cancel(ServerPlayer player, @Nullable String messageKey) {
         if (PENDING.remove(player.getUUID()) != null) {
             PacketDistributor.sendToPlayer(player, new CapsuleConnectingPayload(0));
-            if (tellPlayer) {
-                player.displayClientMessage(Component.translatable("message.overgearedmod.capsule.cancelled"), true);
+            if (messageKey != null) {
+                player.displayClientMessage(Component.translatable(messageKey), true);
             }
         }
     }
@@ -155,7 +159,15 @@ public final class CapsuleService {
         BlockPos pos = pending.capsule().pos();
         boolean here = player.level().dimension() == pending.capsule().dimension();
         boolean capsuleStillThere = here && player.level().getBlockState(pos).getBlock() instanceof CapsuleBlock;
-        if (!capsuleStillThere || !CapsuleRules.inReach(player.distanceToSqr(pos.getCenter()))) {
+        if (!capsuleStillThere) {
+            cancel(player, true);
+            return;
+        }
+        if (!CapsuleRules.stayedStill(player.position().distanceToSqr(pending.anchor()))) {
+            cancel(player, "message.overgearedmod.capsule.cancelled_moved");
+            return;
+        }
+        if (!CapsuleRules.inReach(player.distanceToSqr(pos.getCenter()))) {
             cancel(player, true);
             return;
         }
@@ -170,7 +182,7 @@ public final class CapsuleService {
 
     /** Taking damage wakes you up before you are connected. */
     private static void onDamaged(LivingDamageEvent.Post event) {
-        if (event.getEntity() instanceof ServerPlayer player && isConnecting(player)) {
+        if (event.getNewDamage() > 0 && event.getEntity() instanceof ServerPlayer player && isConnecting(player)) {
             cancel(player, true);
         }
     }

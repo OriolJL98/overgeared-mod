@@ -5,6 +5,8 @@ import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.Vec3;
+import org.jetbrains.annotations.Nullable;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDamageEvent;
@@ -22,12 +24,16 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * {@code /satisfy logout}: a 3-second countdown inside Satisfy that ends in {@link CapsuleService#disconnect}. It is
- * refused after recent combat (damage dealt or taken) and cancelled by damage taken, death, respawn, leaving the
- * server or changing dimension. Damage dealt during the countdown does not cancel it.
+ * refused after recent combat (damage dealt or taken) and cancelled by moving, damage taken, death, respawn, leaving
+ * the server or changing dimension (moving is measured from where the countdown began; see
+ * {@link CapsuleRules#stayedStill}). Damage dealt during the countdown does not cancel it.
  */
 public final class LogoutService {
-    /** Ticks left of the countdown, by player. */
-    private static final Map<UUID, Integer> COUNTDOWN = new ConcurrentHashMap<>();
+    /** Ticks left of the countdown and where the player stood when it began, by player. */
+    private static final Map<UUID, Countdown> COUNTDOWN = new ConcurrentHashMap<>();
+
+    private record Countdown(int ticksLeft, Vec3 anchor) {
+    }
 
     /** What asking to log out did. */
     public enum Start { STARTED, ALREADY_RUNNING, NOT_IN_SATISFY, IN_DANGER }
@@ -57,7 +63,7 @@ public final class LogoutService {
         if (LogoutRules.inDanger(player.server.getTickCount(), CombatClock.last(player))) {
             return Start.IN_DANGER;
         }
-        COUNTDOWN.put(player.getUUID(), LogoutRules.COUNTDOWN_TICKS);
+        COUNTDOWN.put(player.getUUID(), new Countdown(LogoutRules.COUNTDOWN_TICKS, player.position()));
         announce(player, LogoutRules.COUNTDOWN_TICKS);
         return Start.STARTED;
     }
@@ -68,22 +74,26 @@ public final class LogoutService {
 
     /** One tick of the player's countdown, if any. */
     public static void tick(ServerPlayer player) {
-        Integer left = COUNTDOWN.get(player.getUUID());
-        if (left == null) {
+        Countdown countdown = COUNTDOWN.get(player.getUUID());
+        if (countdown == null) {
             return;
         }
         if (!player.isAlive() || !Satisfy.is(player.level())) {
             cancel(player, false);
             return;
         }
-        int next = left - 1;
+        if (!CapsuleRules.stayedStill(player.position().distanceToSqr(countdown.anchor()))) {
+            cancel(player, "message.overgearedmod.capsule.logout_cancelled_moved");
+            return;
+        }
+        int next = countdown.ticksLeft() - 1;
         if (next == 0) {
             // Remove first: disconnect changes dimension, and that would otherwise cancel us half way.
             COUNTDOWN.remove(player.getUUID());
             CapsuleService.disconnect(player, CapsuleService.Reason.LOGOUT);
             return;
         }
-        COUNTDOWN.put(player.getUUID(), next);
+        COUNTDOWN.put(player.getUUID(), new Countdown(next, countdown.anchor()));
         announce(player, next);
     }
 
@@ -96,8 +106,12 @@ public final class LogoutService {
 
     /** Stops the countdown; the "cancelled" message only if {@code tell}. */
     public static void cancel(ServerPlayer player, boolean tell) {
-        if (COUNTDOWN.remove(player.getUUID()) != null && tell) {
-            player.displayClientMessage(Component.translatable("message.overgearedmod.capsule.logout_cancelled"), true);
+        cancel(player, tell ? "message.overgearedmod.capsule.logout_cancelled" : null);
+    }
+
+    private static void cancel(ServerPlayer player, @Nullable String messageKey) {
+        if (COUNTDOWN.remove(player.getUUID()) != null && messageKey != null) {
+            player.displayClientMessage(Component.translatable(messageKey), true);
         }
     }
 

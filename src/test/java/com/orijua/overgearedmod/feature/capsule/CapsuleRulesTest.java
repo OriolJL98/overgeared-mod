@@ -52,6 +52,22 @@ class CapsuleRulesTest {
     }
 
     @Test
+    void stayedStillAllowsTheToleranceAndNothingMore() {
+        assertTrue(CapsuleRules.stayedStill(0.0));
+        double limit = CapsuleRules.STILL_TOLERANCE * CapsuleRules.STILL_TOLERANCE;
+        assertTrue(CapsuleRules.stayedStill(limit));
+        assertFalse(CapsuleRules.stayedStill(Math.nextUp(limit)));
+        assertFalse(CapsuleRules.stayedStill(0.36));
+        assertFalse(CapsuleRules.stayedStill(Double.NaN));
+        assertFalse(CapsuleRules.stayedStill(Double.POSITIVE_INFINITY));
+    }
+
+    @Test
+    void stillToleranceIsSmallerThanTheReach() {
+        assertTrue(CapsuleRules.STILL_TOLERANCE < CapsuleRules.MAX_DISTANCE);
+    }
+
+    @Test
     void stateRoundTripsThroughItsCodec() {
         GlobalPos capsule = GlobalPos.of(Level.OVERWORLD, new BlockPos(1, 64, 2));
         GlobalPos exit = GlobalPos.of(Level.OVERWORLD, new BlockPos(1, 64, 3));
