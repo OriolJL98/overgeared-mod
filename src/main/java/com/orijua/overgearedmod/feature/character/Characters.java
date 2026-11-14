@@ -4,7 +4,9 @@ import com.orijua.overgearedmod.Overgearedmod;
 import com.orijua.overgearedmod.core.registry.ModAttachments;
 import com.orijua.overgearedmod.feature.progression.ProgressionService;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.common.util.FakePlayer;
@@ -62,7 +64,26 @@ public final class Characters {
      * inventory (or drops them) while the player is still in the world they belong to.
      */
     public static void prepareCrossing(ServerPlayer player) {
+        closeMenu(player);
+    }
+
+    /**
+     * Closes the open menu. The cursor goes back to the inventory first, and if it does not fit the player is told it
+     * fell to the ground: vanilla drops it silently, in the world they are about to leave.
+     */
+    private static void closeMenu(ServerPlayer player) {
+        ItemStack carried = player.containerMenu.getCarried();
+        if (carried.isEmpty()) {
+            player.closeContainer();
+            return;
+        }
+        ItemStack cursor = carried.copy();
+        player.containerMenu.setCarried(ItemStack.EMPTY);
         player.closeContainer();
+        if (!player.getInventory().add(cursor)) {
+            player.drop(cursor, false);
+            player.displayClientMessage(Component.translatable("message.overgearedmod.character.cursor_dropped"), true);
+        }
     }
 
     /**
@@ -99,7 +120,7 @@ public final class Characters {
             return Result.FAILED;
         }
         // The menu closes first so the cursor and the crafting grid are part of the character that leaves.
-        player.closeContainer();
+        closeMenu(player);
         CompoundTag outgoing = CharacterSnapshot.capture(player);
         try {
             applier.accept(player, incoming);
